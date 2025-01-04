@@ -1,144 +1,104 @@
 import signIn from "./signIn";
 
-// Function to upload a video to Google Drive
-const saveToDrive = async (videoBlob, fileName, sendResponse) => {
-  // Function to get an access token from Chrome storage
-  async function getAuthTokenFromStorage() {
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.get(["token"], async (result) => {
+const getCognitoToken = () => {
+  return new Promise((resolve, reject) => {
+    chrome.cookies.getAll(
+      { 
+        domain: process.env.DASHBOARD_URL
+      }, 
+      (cookies) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError));
-        } else {
-          const token = result.token;
-          if (!token || token === null) {
-            // Token is not set, trigger sign-in
-            const newToken = await signIn();
-            if (!newToken || newToken === null) {
-              // Sign-in failed, throw an error
-              reject(new Error("Sign-in failed"));
-            }
-            resolve(newToken);
-          } else {
-            // Token is set, check if it has expired
-            let payload;
-            try {
-              payload = JSON.parse(atob(token.split(".")[1]));
-            } catch (err) {
-              // Token is invalid, refresh it
-              chrome.identity.getAuthToken(
-                { interactive: true },
-                (newToken) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError));
-                  } else {
-                    resolve(newToken);
-                  }
-                }
-              );
-              return;
-            }
-
-            const expirationTime = payload.exp * 1000; // Convert to milliseconds
-            const currentTime = Date.now();
-            if (currentTime >= expirationTime) {
-              // Token has expired, refresh it
-              chrome.identity.getAuthToken(
-                { interactive: true },
-                (newToken) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError));
-                  } else {
-                    resolve(newToken);
-                  }
-                }
-              );
-            } else {
-              // Token is still valid
-              resolve(token);
-            }
-          }
+          console.error('Error getting cookies:', chrome.runtime.lastError);
+          reject(chrome.runtime.lastError);
+          return;
         }
-      });
-    });
-  }
 
+        const idTokenCookie = cookies.find(cookie =>
+          cookie.name.startsWith('CognitoIdentityServiceProvider') && 
+          cookie.name.endsWith('idToken')
+        );
+
+        if (idTokenCookie) {
+          console.log('Found Cognito Token:', idTokenCookie.value);
+          resolve(idTokenCookie.value);
+        } else {
+          console.error('No Cognito token found in cookies');
+          reject(new Error('No Cognito token found'));
+        }
+      }
+    );
+  });
+};
+
+
+// Function to upload a video to AWS S3
+const saveToDrive = async (videoBlob, fileName, sendResponse) => {
   return new Promise(async (resolve, reject) => {
     try {
-      // Get the access token from Chrome storage
-      let token = await getAuthTokenFromStorage();
-
-      if (!token || token === null) {
-        throw new Error("Sign-in failed");
-      }
-
-      // Upload the video to Google Drive
-      const headers = new Headers({
-        Authorization: `Bearer ${token}`,
-        "Content-Type": videoBlob.type,
-      });
-
-      const uploadResponse = await fetch(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=media",
+      const token = await getCognitoToken();
+      // First, get the presigned URL from the API
+      const getPresignedUrlResponse = await fetch(
+        process.env.VIDEOS_API_ENDPOINT,
         {
           method: "POST",
-          headers,
-          body: videoBlob,
-        }
-      );
-
-      if (!uploadResponse.ok) {
-        throw new Error(
-          `Error uploading to Google Drive: ${uploadResponse.status}`
-        );
-      }
-
-      const responseData = await uploadResponse.json();
-      const fileId = responseData.id;
-
-      if (!fileId) {
-        throw new Error("File ID is undefined");
-      }
-
-      // Create the metadata for the file
-      const fileMetadata = {
-        name: fileName,
-      };
-
-      // Update the file metadata with the name
-      const metadataResponse = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${fileId}`,
-        {
-          method: "PATCH",
-          headers: new Headers({
+          headers: {
             Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json; charset=UTF-8",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mimeType: "video/webm"
           }),
-          body: JSON.stringify(fileMetadata),
         }
       );
 
-      if (!metadataResponse.ok) {
-        const errorResponse = await metadataResponse.json();
-        console.error(
-          "Error updating file metadata:",
-          metadataResponse.status,
-          errorResponse.error.message
-        );
+      if (!getPresignedUrlResponse.ok) {
         throw new Error(
-          `Error updating file metadata: ${metadataResponse.status}`
+          `Error getting presigned URL: ${getPresignedUrlResponse.status}`
         );
       }
-      sendResponse({ status: "ok", url: fileId });
 
-      // Open the Google Drive file in a new tab
-      chrome.tabs.create({
-        url: `https://drive.google.com/file/d/${fileId}/view`,
+      const responseData = await getPresignedUrlResponse.json();
+      console.info("Full API Response Data:", JSON.stringify(responseData, null, 2));
+
+      const presigned_url = responseData.presigned_url;
+      const upload_path = responseData.upload_path;
+      const video_id = responseData.video_id;
+
+      console.info("S3 Upload URL:", presigned_url);
+      console.info("S3 File Key:", upload_path);
+      console.log("Video ID:", video_id);
+
+      if (!presigned_url) {
+        throw new Error("Failed to get presigned URL from response");
+      }
+    
+      console.log(`type of responseData: ${typeof responseData}`);
+
+    
+      console.log(`presigned_url: ${presigned_url}`);
+      // Upload the video to S3 using the presigned URL
+      const uploadResponse = await fetch(presigned_url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": videoBlob.type,
+        },
+        body: videoBlob,
       });
 
-      resolve(`https://drive.google.com/file/d/${fileId}/view`); // Return the file ID if needed
+      console.info("S3 Upload Response:", {
+        status: uploadResponse.status,
+        statusText: uploadResponse.statusText,
+        headers: Object.fromEntries(uploadResponse.headers.entries())
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Error uploading to S3: ${uploadResponse.status}`);
+      }
+
+      // If upload is successful, resolve with success message
+      resolve({ success: true, message: "Video uploaded successfully" });
     } catch (error) {
-      console.error("Error uploading to Google Drive:", error.message);
-      sendResponse({ status: "ew", url: null });
+      console.error("Error in saveToDrive:", error);
       reject(error);
     }
   });
