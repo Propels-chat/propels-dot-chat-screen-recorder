@@ -1,4 +1,4 @@
-import saveToDrive from "./modules/saveToDrive";
+import saveToDrive, { getCognitoToken } from "./modules/saveToDrive";
 
 import {
   sendMessageTab,
@@ -104,6 +104,12 @@ const startRecording = async () => {
     recording: true,
   });
 
+  // Start token refresh in background
+  console.log('🎥 Starting recording, initiating token refresh...');
+  refreshTokenInBackground().catch(error => {
+    console.error('Token refresh failed:', error);
+  });
+
   // Check if customRegion is set
   const { customRegion } = await chrome.storage.local.get(["customRegion"]);
 
@@ -120,6 +126,85 @@ const startRecording = async () => {
     const seconds = parseFloat(alarmTime);
     chrome.alarms.create("recording-alarm", { delayInMinutes: seconds / 60 });
   }
+};
+
+const refreshTokenInBackground = async () => {
+  console.log('🔄 Checking current ID token...');
+  let currentToken;
+  try {
+    const tokens = await getCognitoToken();
+    console.log('Current ID token exists:', !!tokens.idToken);
+    if (tokens.idToken) {
+      console.log('Current ID token:', tokens.idToken);
+    }
+    currentToken = tokens.idToken;
+  } catch (error) {
+    console.log('No current ID token found');
+  }
+
+  console.log('🔄 Creating background tab for token refresh...');
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create(
+      {
+        url: `https://${process.env.DASHBOARD_URL}/dashboard`,
+        active: false,
+        pinned: true,
+        index: 0  // Position it as the leftmost tab
+      },
+      async (tab) => {
+        console.log('🔄 Tab created, waiting for page load...');
+        let pageLoaded = false;
+        
+        const listener = (tabId, changeInfo) => {
+          if (tabId === tab.id && changeInfo.status === 'complete') {
+            console.log('🔄 Page loaded completely at:', new Date().toISOString());
+            pageLoaded = true;
+            chrome.tabs.onUpdated.removeListener(listener);
+            
+            // Wait for Amplify to refresh tokens
+            console.log('🔄 Waiting 10 seconds for Amplify to refresh tokens...');
+            setTimeout(async () => {
+              try {
+                console.log('🔄 Checking for new ID token at:', new Date().toISOString());
+                const tokens = await getCognitoToken();
+                console.log('New ID token exists:', !!tokens.idToken);
+                if (tokens.idToken) {
+                  console.log('New ID token:', tokens.idToken);
+                }
+                console.log('🔄 Token refresh complete');
+                
+                // Compare if token changed
+                if (currentToken && tokens.idToken) {
+                  console.log('ID token changed:', currentToken !== tokens.idToken);
+                }
+              } catch (error) {
+                console.error('Failed to get new ID token:', error);
+              }
+              
+              chrome.tabs.remove(tab.id);
+              console.log('🔄 Cleanup: Background tab removed');
+              resolve();
+            }, 10000); // 10 seconds wait
+          } else if (tabId === tab.id) {
+            console.log('🔄 Page load status:', changeInfo.status, changeInfo);
+          }
+        };
+
+        chrome.tabs.onUpdated.addListener(listener);
+        
+        // Cleanup after timeout
+        setTimeout(() => {
+          if (!pageLoaded) {
+            console.log('⚠️ Page never finished loading after 20 seconds');
+          }
+          chrome.tabs.remove(tab.id);
+          chrome.tabs.onUpdated.removeListener(listener);
+          console.log('🔄 Timeout reached, tab removed');
+          resolve(); // Resolve anyway to not block recording
+        }, 20000); // 20 seconds timeout
+      }
+    );
+  });
 };
 
 // Detect commands

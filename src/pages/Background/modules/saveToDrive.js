@@ -13,17 +13,15 @@ const getCognitoToken = () => {
           return;
         }
 
-        const idTokenCookie = cookies.find(cookie =>
-          cookie.name.startsWith('CognitoIdentityServiceProvider') && 
+        const idToken = cookies.find(cookie => 
+          cookie.name.includes('CognitoIdentityServiceProvider') && 
           cookie.name.endsWith('idToken')
         );
 
-        if (idTokenCookie) {
-          console.log('Found Cognito Token:', idTokenCookie.value);
-          resolve(idTokenCookie.value);
+        if (idToken) {
+          resolve({ idToken: idToken.value });
         } else {
-          console.error('No Cognito token found in cookies');
-          reject(new Error('No Cognito token found'));
+          reject(new Error('No ID token found'));
         }
       }
     );
@@ -42,7 +40,7 @@ const saveToDrive = async (videoBlob, fileName, sendResponse) => {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${token.idToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -104,4 +102,5 @@ const saveToDrive = async (videoBlob, fileName, sendResponse) => {
   });
 };
 
+export { getCognitoToken };
 export default saveToDrive;
