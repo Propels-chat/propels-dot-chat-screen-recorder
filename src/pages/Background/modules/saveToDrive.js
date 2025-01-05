@@ -94,9 +94,14 @@ const saveToDrive = async (videoBlob, fileName, sendResponse) => {
       }
 
       // If upload is successful, resolve with success message
+      const editorUrl = `https://${process.env.DASHBOARD_URL}/dashboard/${responseData.video_id}/edit`;
+      chrome.tabs.create({
+        url: editorUrl,
+        active: true // Make this tab active since user will want to edit the video
+      });
       resolve({ success: true, message: "Video uploaded successfully" });
     } catch (error) {
-      console.error("Error in saveToDrive:", error);
+      console.error("Error in upload:", error);
       reject(error);
     }
   });

@@ -516,15 +516,15 @@ const RightPanel = () => {
                     {contentState.saveDrive
                       ? chrome.i18n.getMessage("savingDriveLabel")
                       : contentState.driveEnabled
-                      ? chrome.i18n.getMessage("saveDriveButtonTitle")
-                      : chrome.i18n.getMessage("signInDriveLabel")}
+                      ? "Upload Video"
+                      : "Upload Video"}
                   </div>
                   <div className={styles.buttonDescription}>
                     {contentState.offline
                       ? chrome.i18n.getMessage("noConnectionLabel")
                       : contentState.updateChrome
                       ? chrome.i18n.getMessage("notAvailableLabel")
-                      : chrome.i18n.getMessage("saveDriveButtonDescription")}
+                      : "Upload video to server"}
                   </div>
                 </div>
                 <div className={styles.buttonRight}>
