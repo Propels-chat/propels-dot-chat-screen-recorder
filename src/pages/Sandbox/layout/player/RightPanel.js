@@ -16,6 +16,7 @@ import AudioUI from "../editor/AudioUI";
 import { ContentStateContext } from "../../context/ContentState"; // Import the ContentState context
 
 const RightPanel = () => {
+  console.log('Styles:', styles);
   const [contentState, setContentState] = useContext(ContentStateContext); // Access the ContentState context
   const [webmFallback, setWebmFallback] = useState(false);
   const contentStateRef = useRef(contentState);
@@ -33,10 +34,11 @@ const RightPanel = () => {
   }, [contentState]);
 
   const saveToDrive = () => {
-    //if (contentState.noffmpeg) return;
+    // Reset both states at the start
     setContentState((prevContentState) => ({
       ...prevContentState,
       saveDrive: true,
+      uploadError: null
     }));
 
     if (contentState.noffmpeg || !contentState.mp4ready || !contentState.blob) {
@@ -46,16 +48,28 @@ const RightPanel = () => {
           title: contentState.title,
         })
         .then((response) => {
-          if (response.status === "ew") {
-            // Cancel saving to drive
+          if (response && response.status === "ok") {
             setContentState((prevContentState) => ({
               ...prevContentState,
               saveDrive: false,
+              uploadError: null
+            }));
+          } else {
+            setContentState((prevContentState) => ({
+              ...prevContentState,
+              saveDrive: false,
+              uploadError: 'NO_TOKEN_FOUND'
             }));
           }
+        })
+        .catch(() => {
+          setContentState((prevContentState) => ({
+            ...prevContentState,
+            saveDrive: false,
+            uploadError: 'NO_TOKEN_FOUND'
+          }));
         });
     } else {
-      // Blob to base64
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result;
@@ -68,20 +82,30 @@ const RightPanel = () => {
             title: contentState.title,
           })
           .then((response) => {
-            if (response.status === "ew") {
-              // Cancel saving to drive
+            if (response && response.status === "ok") {
               setContentState((prevContentState) => ({
                 ...prevContentState,
                 saveDrive: false,
+                uploadError: null
+              }));
+            } else {
+              setContentState((prevContentState) => ({
+                ...prevContentState,
+                saveDrive: false,
+                uploadError: 'NO_TOKEN_FOUND'
               }));
             }
+          })
+          .catch(() => {
+            setContentState((prevContentState) => ({
+              ...prevContentState,
+              saveDrive: false,
+              uploadError: 'NO_TOKEN_FOUND'
+            }));
           });
       };
-      if (
-        !contentState.noffmpeg &&
-        contentState.mp4ready &&
-        contentState.blob
-      ) {
+
+      if (!contentState.noffmpeg && contentState.mp4ready && contentState.blob) {
         reader.readAsDataURL(contentState.blob);
       } else {
         reader.readAsDataURL(contentState.webm);
@@ -533,6 +557,60 @@ const RightPanel = () => {
               </div>
             </div>
           </div>
+          {contentState.uploadError && (
+          <div className={styles.errorMessage}>
+            {contentState.uploadError === 'NO_TOKEN_FOUND' ? (
+              <div className={styles.errorContent}>
+                <div className={styles.errorLeft}>
+                  <div className={styles.errorTitle}>You don't have an account yet</div>
+                  <div className={styles.errorDescription}>
+                    Please sign up to save your recordings
+                  </div>
+                  <div className={styles.errorNote}>
+                    After signing up, come back here and click 'Retry' to upload your recording
+                  </div>
+                </div>
+                <div className={styles.errorButtons}>
+                  <div 
+                    className={`${styles.errorButton} ${styles.primary}`}
+                    onClick={() => {
+                      chrome.tabs.create({
+                        url: `https://${process.env.DASHBOARD_URL}/dashboard`,
+                        active: true
+                      });
+                    }}
+                  >
+                    <span>Sign Up</span>
+                  </div>
+                  <div 
+                    className={`${styles.errorButton} ${styles.secondary}`}
+                    onClick={saveToDrive}
+                  >
+                    <span>Retry</span>
+                  </div>
+                </div>
+              </div>
+            ) : contentState.uploadError === 'TOKEN_EXPIRED' ? (
+              <div className={styles.errorContent}>
+                <div className={styles.errorLeft}>
+                  <div className={styles.errorTitle}>Session expired</div>
+                  <div className={styles.errorDescription}>
+                    Your session has expired. Please sign in again to continue.
+                  </div>
+                </div>
+                <div className={styles.errorButtons}>
+                  <div 
+                    className={`${styles.errorButton} ${styles.secondary}`}
+                    onClick={saveToDrive}
+                  >
+                    <ReactSVG src={URL + "editor/icons/right-arrow.svg"} />
+                    <span>Retry</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
         </div>
       )}
     </div>
