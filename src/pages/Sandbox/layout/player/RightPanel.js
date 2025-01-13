@@ -19,6 +19,7 @@ const RightPanel = () => {
   console.log('Styles:', styles);
   const [contentState, setContentState] = useContext(ContentStateContext); // Access the ContentState context
   const [webmFallback, setWebmFallback] = useState(false);
+  const [retryUpload, setRetryUpload] = useState(false);
   const contentStateRef = useRef(contentState);
   const consoleErrorRef = useRef([]);
 
@@ -33,12 +34,18 @@ const RightPanel = () => {
     contentStateRef.current = contentState;
   }, [contentState]);
 
+  // Handle retry upload
+  useEffect(() => {
+    if (retryUpload) {
+      setRetryUpload(false); // Reset the trigger
+      saveToDrive();
+    }
+  }, [retryUpload]);
+
   const saveToDrive = () => {
-    // Reset both states at the start
     setContentState((prevContentState) => ({
       ...prevContentState,
       saveDrive: true,
-      uploadError: null
     }));
 
     if (contentState.noffmpeg || !contentState.mp4ready || !contentState.blob) {
@@ -183,14 +190,14 @@ const RightPanel = () => {
   };
 
   const handleRawRecording = () => {
-    if (typeof contentStateRef.current.openModal === "function") {
-      contentStateRef.current.openModal(
+    if (typeof contentState.openModal === "function") {
+      contentState.openModal(
         chrome.i18n.getMessage("rawRecordingModalTitle"),
         chrome.i18n.getMessage("rawRecordingModalDescription"),
         chrome.i18n.getMessage("rawRecordingModalButton"),
         chrome.i18n.getMessage("sandboxEditorCancelButton"),
         () => {
-          const blob = contentStateRef.current.rawBlob;
+          const blob = contentState.rawBlob;
           const url = window.URL.createObjectURL(blob);
           chrome.downloads.download(
             {
@@ -208,8 +215,8 @@ const RightPanel = () => {
   };
 
   const handleTroubleshooting = () => {
-    if (typeof contentStateRef.current.openModal === "function") {
-      contentStateRef.current.openModal(
+    if (typeof contentState.openModal === "function") {
+      contentState.openModal(
         chrome.i18n.getMessage("troubleshootModalTitle"),
         chrome.i18n.getMessage("troubleshootModalDescription"),
         chrome.i18n.getMessage("troubleshootModalButton"),
@@ -221,14 +228,14 @@ const RightPanel = () => {
           chrome.runtime.getPlatformInfo(function (info) {
             platformInfo = info;
             const manifestInfo = chrome.runtime.getManifest().version;
-            const blob = contentStateRef.current.rawBlob;
+            const blob = contentState.rawBlob;
 
             // Now we need to create a file with all of this data
             const data = {
               userAgent: userAgent,
               platformInfo: platformInfo,
               manifestInfo: manifestInfo,
-              contentState: contentStateRef.current,
+              contentState: contentState,
             };
             // Create a zip file with the original recording and the data
             const zip = new JSZip();
@@ -251,6 +258,19 @@ const RightPanel = () => {
         () => {}
       );
     }
+  };
+
+  const handleRetry = () => {
+    // First clear the error state
+    setContentState((prevContentState) => ({
+      ...prevContentState,
+      uploadError: null,
+      saveDrive: false
+    }));
+    // Use setTimeout to ensure state updates are processed
+    setTimeout(() => {
+      setRetryUpload(true);
+    }, 0);
   };
 
   return (
@@ -584,7 +604,7 @@ const RightPanel = () => {
                   </div>
                   <div 
                     className={`${styles.errorButton} ${styles.secondary}`}
-                    onClick={saveToDrive}
+                    onClick={handleRetry}
                   >
                     <span>Retry</span>
                   </div>
@@ -601,7 +621,7 @@ const RightPanel = () => {
                 <div className={styles.errorButtons}>
                   <div 
                     className={`${styles.errorButton} ${styles.secondary}`}
-                    onClick={saveToDrive}
+                    onClick={handleRetry}
                   >
                     <ReactSVG src={URL + "editor/icons/right-arrow.svg"} />
                     <span>Retry</span>
